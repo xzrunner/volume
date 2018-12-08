@@ -1,0 +1,6 @@
+volume/
+projects/*
+
+!projects/volume.vcxproj
+!projects/volume.vcxproj.filters
+
