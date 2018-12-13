@@ -32,12 +32,10 @@ bool RawLoader::Load(VolumeData& data, const std::string& filepath)
 
 	const int n = w * h * d;
 
-	auto alpha_buf = new char[n];
+	auto alpha_buf = new unsigned char[n];
 	if (!alpha_buf) {
 		return false;
 	}
-	data.buf.reset(alpha_buf);
-
 	struct fs_file* file = fs_open(filepath.c_str(), "rb");
 	if (!file) {
 		return false;
@@ -45,7 +43,18 @@ bool RawLoader::Load(VolumeData& data, const std::string& filepath)
 	fs_read(file, alpha_buf, n);
 	fs_close(file);
 
-	return true;	
+	auto rgba_buf = new unsigned char[n * 4];
+	for (int i = 0; i < n; ++i) {
+		rgba_buf[i * 4 + 0] = alpha_buf[i];
+		rgba_buf[i * 4 + 1] = alpha_buf[i];
+		rgba_buf[i * 4 + 2] = alpha_buf[i];
+		rgba_buf[i * 4 + 3] = alpha_buf[i];
+	}
+	data.rgba.reset(rgba_buf);
+
+	delete[] alpha_buf;
+
+	return true;
 }
 
 }

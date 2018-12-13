@@ -109,15 +109,11 @@ bool sample_volume( const openvdb::Coord& extents, SamplingFunc sampling_func, F
                     {
                         for (auto x = bbox.min().x(); x <= bbox.max().x(); ++x)
                         {
-                            const auto domain_index = openvdb::Vec3i(x, y, z);
-                            const auto linear_index = domain_index.dot(stride) * 4;
-                            const auto sample_value = sampling_func(domain_index);
-
-                            // fixme
-                            out_samples[linear_index + 0] = sample_value;
-                            out_samples[linear_index + 1] = sample_value;
-                            out_samples[linear_index + 2] = sample_value;
-                            out_samples[linear_index + 3] = sample_value;
+                            const auto volume_idx = openvdb::Vec3i(x, y, z);
+                            const auto array_idx = volume_idx.dot(stride);
+//                            const auto sample_value = -sampling_func(volume_idx);
+							const auto sample_value = sampling_func(volume_idx);
+                            out_samples[array_idx] = sample_value;
                             this_thread_range.addValue(sample_value);
                         }
                     }
@@ -132,7 +128,7 @@ bool sample_volume( const openvdb::Coord& extents, SamplingFunc sampling_func, F
     }
 
     // Remap sample values to [0, 1].
-    int size = num_voxels * 4;
+    int size = num_voxels;
     typedef tbb::blocked_range<size_t> tbb_range;
     tbb::parallel_for(tbb_range(0, size), [out_samples, &out_value_range](const tbb_range& range)
     {
@@ -173,7 +169,7 @@ bool sample_grid(
         return sampler.wsSample(sample_pos_ws);
     };
 
-    sample_volume( sampling_extents, sampling_func, value_range, out_data);
+    sample_volume(sampling_extents, sampling_func, value_range, out_data);
 }
 
 }
@@ -181,7 +177,7 @@ bool sample_grid(
 namespace vol
 {
 
-bool OpenVDBLoader::Load(VolumeData& data, const std::string& filepath)
+bool OpenVDBLoader::Load(VolumeData& data, const std::string& filepath, float import_scale)
 {
 	openvdb::initialize();
 
@@ -193,7 +189,6 @@ bool OpenVDBLoader::Load(VolumeData& data, const std::string& filepath)
 		return false;
 	}
 
-//	auto archive = file.copy();
 	auto grids_ptr = file.getGrids();
 	openvdb::GridCPtrVec grids;
 	grids.insert(grids.end(), grids_ptr->begin(), grids_ptr->end());
@@ -204,41 +199,60 @@ bool OpenVDBLoader::Load(VolumeData& data, const std::string& filepath)
 		return false;
 	}
 
-	auto grid = openvdb::gridConstPtrCast<openvdb::FloatGrid>(grids[0]);
-	openvdb::Coord extents = { 256, 256, 256 };
+	// log
+	for (auto& grid : grids) {
+		grid->print();
+	}
 
-	grid->print();
+	auto grid = openvdb::gridConstPtrCast<openvdb::FloatGrid>(grids[0]);
+
+	const auto grid_bbox_is = get_index_space_bounding_box(*grid);
+	const auto w = static_cast<int>(std::ceil((grid_bbox_is.max().x() - grid_bbox_is.min().x() + 1) * import_scale));
+	const auto h = static_cast<int>(std::ceil((grid_bbox_is.max().y() - grid_bbox_is.min().y() + 1) * import_scale));
+	const auto d = static_cast<int>(std::ceil((grid_bbox_is.max().z() - grid_bbox_is.min().z() + 1) * import_scale));
+	openvdb::Coord extents = { w, h, d };
 
 	// sample
 
-//	openvdb::Coord extents{ extents.x(), extents.y(), extents.z() };
-
-	FloatRange value_range;
-	openvdb::Vec3d scale;
-	float* buffer = new float[extents.x() * extents.y() * extents.z() * 4];
-	sample_grid(*openvdb::gridConstPtrCast<openvdb::FloatGrid>(grid), extents, value_range, scale, buffer);
-	//m_summary->min_value = value_range.getMin();
-	//m_summary->max_value = value_range.getMax();
-
-	//m_summary->x_scale = scale.x() * m_scaleFactor;
-	//m_summary->y_scale = scale.y() * m_scaleFactor;
-	//m_summary->z_scale = scale.z() * m_scaleFactor;
-
-	const int w = extents.x();
-	const int h = extents.y();
-	const int d = extents.z();
-
+	const int n = w * h * d;
 	data.width  = w;
 	data.height = h;
 	data.depth  = d;
-	const int n = w * h * d;
-	auto alpha_buf = new char[n];
-	memset(alpha_buf, n, 0);
-	int ptr = 0;
-	for (int i = 0; i < n; ++i, ptr += 4) {
-		alpha_buf[i] = static_cast<char>(255 * buffer[ptr]);
+
+	auto rgba_buf = new unsigned char[n * 4];
+	memset(rgba_buf, n * 4, 0);
+	if (grids.size() == 4)
+	{
+		FloatRange value_range;
+		openvdb::Vec3d scale;
+		float* channel_buf = new float[n];
+		for (int i = 0; i < 4; ++i)
+		{
+			sample_grid(*openvdb::gridConstPtrCast<openvdb::FloatGrid>(grid), extents, value_range, scale, channel_buf);
+			for (int j = 0; j < n; ++j) {
+				rgba_buf[j * 4 + i] = static_cast<unsigned char>(255 * channel_buf[j]);
+			}
+		}
+
+		delete[] channel_buf;
 	}
-	data.buf.reset(alpha_buf);
+	else
+	{
+		FloatRange value_range;
+		openvdb::Vec3d scale;
+		float* alpha_buf = new float[n];
+		sample_grid(*openvdb::gridConstPtrCast<openvdb::FloatGrid>(grid), extents, value_range, scale, alpha_buf);
+		for (int i = 0; i < n; ++i)
+		{
+			const unsigned char alpha = static_cast<unsigned char>(255 * alpha_buf[i]);
+			rgba_buf[i * 4 + 0] = alpha;
+			rgba_buf[i * 4 + 1] = alpha;
+			rgba_buf[i * 4 + 2] = alpha;
+			rgba_buf[i * 4 + 3] = alpha;
+		}
+		delete[] alpha_buf;
+	}
+	data.rgba.reset(rgba_buf);
 
 	return true;
 }
@@ -258,7 +272,6 @@ OpenVDBLoader::LoadFromFile(const std::string& filepath)
 		return false;
 	}
 
-//	auto archive = file.copy();
 	auto grids_ptr = file.getGrids();
 	openvdb::GridCPtrVec grids;
 	grids.insert(grids.end(), grids_ptr->begin(), grids_ptr->end());
@@ -270,7 +283,6 @@ OpenVDBLoader::LoadFromFile(const std::string& filepath)
 	}
 
 	auto grid = openvdb::gridConstPtrCast<openvdb::FloatGrid>(grids[0]);
-//	openvdb::Coord extents = { 256, 256, 256 };
 	return std::make_shared<Volume>(grid);
 }
 

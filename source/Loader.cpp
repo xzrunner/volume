@@ -13,7 +13,9 @@ bool Loader::Load(VolumeData& data, const std::string& filepath)
 	if (ext == ".raw3d") {
 		return RawLoader::Load(data, filepath);
 	} else if (ext == ".vdb") {
-		return OpenVDBLoader::Load(data, filepath);
+		const float import_scale = 0.5f;
+//		const float import_scale = 1;
+		return OpenVDBLoader::Load(data, filepath, import_scale);
 	}
 
 	return false;

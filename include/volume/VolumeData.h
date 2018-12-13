@@ -11,7 +11,7 @@ struct VolumeData
 	int height = 0;
 	int depth = 0;
 
-	std::unique_ptr<char[]> buf = nullptr;
+	std::unique_ptr<unsigned char[]> rgba = nullptr;
 
 }; // VolumeData
 
