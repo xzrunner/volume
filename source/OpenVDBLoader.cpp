@@ -137,6 +137,8 @@ bool sample_volume( const openvdb::Coord& extents, SamplingFunc sampling_func, F
             out_samples[i] = unlerp( out_value_range.getMin(), out_value_range.getMax(), out_samples[i]);
         }
     });
+
+    return true;
 }
 
 template <typename RealType>
@@ -169,7 +171,7 @@ bool sample_grid(
         return sampler.wsSample(sample_pos_ws);
     };
 
-    sample_volume(sampling_extents, sampling_func, value_range, out_data);
+    return sample_volume(sampling_extents, sampling_func, value_range, out_data);
 }
 
 }
